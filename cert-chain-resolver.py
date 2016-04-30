@@ -27,6 +27,7 @@ import OpenSSL.crypto
 import re
 import urllib2
 import sys
+import subprocess
 
 issuer_re = re.compile('^CA Issuers - URI:(.*)$', re.MULTILINE)
 
@@ -114,8 +115,22 @@ SSL certificate chain resolver
                     if m:
                         found = True
                         infile = urllib2.urlopen(m.group(1))
+                        contenttype = infile.info().gettype()
                         cert_text = infile.read()
                         infile.close()
+                        if contenttype == "application/x-pkcs7-mime":
+                            # HACK: call the openssl cli tool since pyOpenSSL doesn't export the functions to process PKCS#7 data
+                            proc = subprocess.Popen(["openssl", "pkcs7", "-inform", "DER", "-outform", "PEM", "-print_certs"],
+                                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            out, err = proc.communicate(cert_text)
+                            if proc.returncode != 0:
+                                proc = subprocess.Popen(["openssl", "pkcs7", "-inform", "PEM", "-outform", "PEM", "-print_certs"],
+                                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                out, err = proc.communicate(cert_text)
+                                if proc.returncode != 0:
+                                    sys.stderr.write("Invalid PKCS#7 data encountered\n")
+                                    exit(1)
+                            cert_text = out
 
     sys.stderr.write("%d certificate(s) found.\n" % (n-1))
 
