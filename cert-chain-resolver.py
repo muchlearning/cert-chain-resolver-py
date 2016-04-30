@@ -40,13 +40,16 @@ SSL certificate chain resolver
     parser.add_argument("-o", "--output", metavar="FILE", required=True, help="write chain to FILE (NOTE: the output will not contain the given certificate)")
     parser.add_argument("-n", metavar="NUM", required=False, type=int, help="maximum number of certificates to fetch (not including the given certificate)")
     parser.add_argument("-t", "--trusted", metavar="STORE", required=False, help="stop fetching when we find a certificate signed by a trusted CA whose certificate is given in STORE (STORE may contain multiple PEM-format certificates concatenated together)")
+    parser.add_argument("--verify", required=False, action="store_true", help="verify the certificate chain after fetching it")
 
     args = parser.parse_args()
     store = None
-    if args.trusted:
+    if args.verify or args.trusted:
         if not hasattr(OpenSSL.crypto, "X509StoreContext"):
             sys.stderr.write("Error: pyOpenSSL 0.15 or greater is required for verifying certificates\n")
             exit(1)
+
+    if args.trusted:
         store = OpenSSL.crypto.X509Store()
         with open(args.trusted, 'r') as f:
             line = f.readline()
@@ -71,25 +74,36 @@ SSL certificate chain resolver
         first = True
         found = True
         n = 0
+        certs = []
         while found:
+            # parse the certificate data
             try:
                 cert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, cert_text)
             except:
                 cert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_ASN1, cert_text)
+            sys.stderr.write("%d: %s\n" % (n, cert.get_subject().commonName))
+            certs.append(cert)
+
+            # check and write the certificate
+            if cert.has_expired():
+                sys.stderr.write("Error: Certificate expired")
+                exit(1)
             if n != 0:
                 outfile.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, cert))
-            sys.stderr.write("%d: %s\n" % (n, cert.get_subject().commonName))
+
             n = n+1
+            # check if we should stop
             if store:
-                storectx = OpenSSL.crypto.X509StoreContext(store, cert)
                 try:
-                    storectx.verify_certificate()
+                    OpenSSL.crypto.X509StoreContext(store, cert).verify_certificate()
                     sys.stderr.write("Certificate is signed by a trusted CA\n")
                     break
                 except:
                     pass
             if args.n and args.n < n:
                 break
+
+            # try to fetch the next certificate
             found = False
             num_extensions = cert.get_extension_count()
             for i in range(0,num_extensions-1):
@@ -102,4 +116,14 @@ SSL certificate chain resolver
                         infile = urllib2.urlopen(m.group(1))
                         cert_text = infile.read()
                         infile.close()
+
     sys.stderr.write("%d certificate(s) found.\n" % (n-1))
+
+    # verify the chain
+    if args.verify:
+        if not store:
+            store = OpenSSL.crypto.X509Store()
+        for cert in certs:
+            store.add_cert(cert)
+        OpenSSL.crypto.X509StoreContext(store, certs[0]).verify_certificate()
+        sys.stderr.write("Certificate chain verified\n")
