@@ -15,3 +15,4 @@ certificate chain for a given server certificate.
 
 * [zakjan/cert-chain-resolver](https://github.com/zakjan/cert-chain-resolver) (Go)
 * [freekmurze/ssl-certificate-chain-resolver](https://github.com/freekmurze/ssl-certificate-chain-resolver) (PHP)
+* [SSLMate/mkcertchan](https://github.com/SSLMate/mkcertchain) (Perl)
